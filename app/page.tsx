@@ -154,19 +154,6 @@ export default function HuggingFaceChatUI() {
 
         <Separator className="bg-gray-800" />
 
-        {/* Projects */}
-        <div className="p-2 flex-1">
-          <div className="text-xs text-gray-400 mb-2 px-2">Projects</div>
-          <ScrollArea className="h-32">
-            {projects.map((project, index) => (
-              <Button key={index} variant="ghost" className="w-full justify-start mb-1 text-sm hover:bg-gray-800">
-                <div className="w-2 h-2 bg-gray-600 rounded-full mr-3" />
-                {project}
-              </Button>
-            ))}
-          </ScrollArea>
-        </div>
-
         <Separator className="bg-gray-800" />
 
         {/* Chat History */}
