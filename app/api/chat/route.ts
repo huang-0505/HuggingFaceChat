@@ -17,50 +17,34 @@ export async function POST(req: Request) {
     const hf = new HfInference(token)
     const { messages } = await req.json()
 
-    // Use Mistral model
+    // Use Mistral model with textGeneration (this is the correct method)
     const modelName = "mistralai/Mistral-7B-Instruct-v0.3"
 
-    // Build conversation arrays for conversational API
-    const past_user_inputs = messages
-      .filter((m: any) => m.role === "user")
-      .slice(0, -1) // All user messages except the last one
-      .map((m: any) => m.content)
+    // Build conversation context for Mistral
+    const conversationHistory = messages
+      .map((msg: any) => {
+        if (msg.role === "user") {
+          return `[INST] ${msg.content} [/INST]`
+        } else {
+          return msg.content
+        }
+      })
+      .join("\n")
 
-    const generated_responses = messages.filter((m: any) => m.role === "assistant").map((m: any) => m.content)
+    console.log("Using model:", modelName)
+    console.log("Conversation history:", conversationHistory.slice(0, 200) + "...")
 
-    const latest_message = messages.filter((m: any) => m.role === "user").slice(-1)[0]?.content // Get the latest user message
-
-    console.log("Past user inputs:", past_user_inputs)
-    console.log("Generated responses:", generated_responses)
-    console.log("Latest message:", latest_message)
-
-    if (!latest_message) {
-      throw new Error("No user message found.")
-    }
-
-    // Make sure arrays are balanced (same length or generated_responses is one less)
-    if (past_user_inputs.length !== generated_responses.length) {
-      console.log("Adjusting conversation history for balance")
-      // If unbalanced, trim to make them equal
-      const minLength = Math.min(past_user_inputs.length, generated_responses.length)
-      past_user_inputs.splice(minLength)
-      generated_responses.splice(minLength)
-    }
-
-    console.log("Calling Mistral with conversational API...")
-
-    const response = await hf.conversational({
+    // Use textGeneration - this is the correct method for Mistral
+    const response = await hf.textGeneration({
       model: modelName,
-      inputs: {
-        past_user_inputs,
-        generated_responses,
-        text: latest_message,
-      },
+      inputs: conversationHistory,
       parameters: {
-        max_length: 500,
+        max_new_tokens: 500,
         temperature: 0.7,
         do_sample: true,
+        return_full_text: false,
         repetition_penalty: 1.1,
+        stop: ["[INST]", "</s>"],
       },
     })
 
@@ -80,13 +64,11 @@ export async function POST(req: Request) {
   } catch (error: any) {
     console.error("Mistral Error:", error)
     console.error("Error details:", error.response?.data || error.message)
-    console.error("Full error:", JSON.stringify(error, null, 2))
 
     return new Response(
       JSON.stringify({
         error: "Woof! Error: " + error.message + " 🐾",
         details: error.response?.data || "No additional details",
-        fullError: error.toString(),
       }),
       {
         status: 500,
