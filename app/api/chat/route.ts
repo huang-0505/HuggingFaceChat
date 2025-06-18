@@ -1,4 +1,6 @@
+export const runtime = "nodejs";
 import { HfInference } from "@huggingface/inference"
+console.log("ENV TOKEN IN SERVER:", process.env.HUGGING_FACE_ACCESS_TOKEN?.slice(0, 5));
 
 export async function POST(req: Request) {
   try {
