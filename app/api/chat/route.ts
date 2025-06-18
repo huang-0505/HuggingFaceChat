@@ -16,33 +16,23 @@ export async function POST(req: Request) {
     const { messages } = await req.json()
     const modelName = "mistralai/Mistral-7B-Instruct-v0.3"
 
-    // Build conversation arrays for conversational API
-    const past_user_inputs = messages
-      .filter((m: any) => m.role === "user")
-      .slice(0, -1) // All user messages except the last one
-      .map((m: any) => m.content)
+    // Build conversation as a single string for Mistral
+    let conversationText = ""
 
-    const generated_responses = messages.filter((m: any) => m.role === "assistant").map((m: any) => m.content)
-
-    const latest_message = messages.filter((m: any) => m.role === "user").slice(-1)[0]?.content // Get the latest user message
-
-    console.log("Past user inputs:", past_user_inputs)
-    console.log("Generated responses:", generated_responses)
-    console.log("Latest message:", latest_message)
-
-    if (!latest_message) {
-      throw new Error("No user message found.")
+    for (const message of messages) {
+      if (message.role === "user") {
+        conversationText += `[INST] ${message.content} [/INST]\n`
+      } else {
+        conversationText += `${message.content}\n`
+      }
     }
 
-    // Make sure arrays are balanced
-    if (past_user_inputs.length !== generated_responses.length) {
-      console.log("Adjusting conversation history for balance")
-      const minLength = Math.min(past_user_inputs.length, generated_responses.length)
-      past_user_inputs.splice(minLength)
-      generated_responses.splice(minLength)
-    }
+    // Remove the last newline and add space for the assistant response
+    conversationText = conversationText.trim()
 
-    // Use raw fetch to call the conversational endpoint directly
+    console.log("Conversation text:", conversationText.slice(0, 200) + "...")
+
+    // Use raw fetch with string input (not object)
     const response = await fetch(`https://api-inference.huggingface.co/models/${modelName}`, {
       method: "POST",
       headers: {
@@ -50,16 +40,14 @@ export async function POST(req: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        inputs: {
-          past_user_inputs,
-          generated_responses,
-          text: latest_message,
-        },
+        inputs: conversationText, // String, not object!
         parameters: {
-          max_length: 500,
+          max_new_tokens: 500,
           temperature: 0.7,
           do_sample: true,
+          return_full_text: false,
           repetition_penalty: 1.1,
+          stop: ["[INST]", "</s>"],
         },
       }),
     })
@@ -73,9 +61,20 @@ export async function POST(req: Request) {
     const data = await response.json()
     console.log("Mistral Response:", data)
 
+    // Handle different response formats
+    let generatedText = ""
+    if (Array.isArray(data) && data[0]?.generated_text) {
+      generatedText = data[0].generated_text
+    } else if (data.generated_text) {
+      generatedText = data.generated_text
+    } else {
+      console.error("Unexpected response format:", data)
+      throw new Error("Unexpected response format from Mistral")
+    }
+
     return new Response(
       JSON.stringify({
-        content: data.generated_text.trim(),
+        content: generatedText.trim(),
         role: "assistant",
       }),
       {
