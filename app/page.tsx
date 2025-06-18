@@ -106,18 +106,6 @@ export default function HuggingFaceChatUI() {
 
   const sidebarItems = [
     { icon: MessageSquare, label: "New chat", action: startNewChat },
-    { icon: Search, label: "Search chats" },
-    { icon: Library, label: "Library" },
-    { icon: Code, label: "Codex" },
-    { icon: Sparkles, label: "Custom Models" },
-  ]
-
-  const projects = [
-    "HF Model Testing",
-    "Text Classification",
-    "Sentiment Analysis",
-    "Custom Fine-tuning",
-    "Model Comparison",
   ]
 
   return (
