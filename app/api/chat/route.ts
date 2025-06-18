@@ -13,7 +13,7 @@ export async function POST(req: Request) {
 
     const hf = new HfInference(token)
     const { messages } = await req.json()
-    const modelName = "huang342/vetllm0.05"
+    const modelName = "mistralai/Mistral-7B-Instruct-v0.3"
 
     const conversationHistory = messages
       .map((msg: any) => `${msg.role === "user" ? "Human" : "VetLLM"}: ${msg.content}`)
