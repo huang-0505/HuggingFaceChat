@@ -1,10 +1,12 @@
 import { HfInference } from "@huggingface/inference"
 
-const hf = new HfInference(process.env.HUGGING_FACE_ACCESS_TOKEN!) // <-- Ensure this is set in Vercel
+console.log("TOKEN:", process.env.HUGGING_FACE_ACCESS_TOKEN)
 
 export async function POST(req: Request) {
   try {
     const { messages, model } = await req.json()
+
+    const hf = new HfInference(process.env.HUGGING_FACE_ACCESS_TOKEN!) // <-- Ensure this is set in Vercel
 
     // Use last user message as the prompt
     const lastMessage = messages[messages.length - 1]
