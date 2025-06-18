@@ -1,33 +1,36 @@
 import { HfInference } from "@huggingface/inference"
 
-console.log("TOKEN:", process.env.HUGGING_FACE_ACCESS_TOKEN)
+const hf = new HfInference(process.env.HUGGING_FACE_ACCESS_TOKEN)
 
 export async function POST(req: Request) {
   try {
-    const { messages, model } = await req.json()
+    const { messages } = await req.json()
 
-    const hf = new HfInference(process.env.HUGGING_FACE_ACCESS_TOKEN!) // <-- Ensure this is set in Vercel
+    const modelName = "huang342/vetllm0.05"
 
-    // Use last user message as the prompt
-    const lastMessage = messages[messages.length - 1]
-    const prompt = lastMessage.content
+    // Build conversation context for better responses
+    const conversationHistory = messages
+      .map((msg: any) => `${msg.role === "user" ? "Human" : "VetLLM"}: ${msg.content}`)
+      .join("\n")
 
-    // Your model ID on Hugging Face (replace this if hardcoding is fine)
-    const modelName = model || "huang342/vetllm0.05" // Replace with your real model ID
+    const prompt = conversationHistory + "\nVetLLM:"
 
     const response = await hf.textGeneration({
       model: modelName,
       inputs: prompt,
       parameters: {
-        max_new_tokens: 512,
+        max_new_tokens: 500,
         temperature: 0.7,
+        do_sample: true,
         return_full_text: false,
+        repetition_penalty: 1.1,
+        stop: ["Human:", "\nHuman:", "User:", "\nUser:"], // Stop at user input
       },
     })
 
     return new Response(
       JSON.stringify({
-        content: response.generated_text,
+        content: response.generated_text.trim(),
         role: "assistant",
       }),
       {
@@ -37,10 +40,17 @@ export async function POST(req: Request) {
       },
     )
   } catch (error) {
-    console.error("Hugging Face error:", error)
-    return new Response(JSON.stringify({ error: "Failed to generate response from Hugging Face." }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    })
+    console.error("VetLLM Error:", error)
+    return new Response(
+      JSON.stringify({
+        error: "Woof! I'm having trouble connecting to the VetLLM. Please try again! 🐾",
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    )
   }
 }
