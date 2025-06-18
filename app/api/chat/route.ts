@@ -1,14 +1,20 @@
 import { HfInference } from "@huggingface/inference"
 
-const hf = new HfInference(process.env.HUGGING_FACE_ACCESS_TOKEN)
-
 export async function POST(req: Request) {
   try {
-    const { messages } = await req.json()
+    // Debug: Check if token exists
+    const token = process.env.HUGGING_FACE_ACCESS_TOKEN
+    console.log("Token exists:", !!token)
+    console.log("Token starts with hf_:", token?.startsWith("hf_"))
 
+    if (!token) {
+      throw new Error("Missing HUGGING_FACE_ACCESS_TOKEN environment variable")
+    }
+
+    const hf = new HfInference(token)
+    const { messages } = await req.json()
     const modelName = "huang342/vetllm0.05"
 
-    // Build conversation context for better responses
     const conversationHistory = messages
       .map((msg: any) => `${msg.role === "user" ? "Human" : "VetLLM"}: ${msg.content}`)
       .join("\n")
@@ -24,7 +30,7 @@ export async function POST(req: Request) {
         do_sample: true,
         return_full_text: false,
         repetition_penalty: 1.1,
-        stop: ["Human:", "\nHuman:", "User:", "\nUser:"], // Stop at user input
+        stop: ["Human:", "\nHuman:", "User:", "\nUser:"],
       },
     })
 
@@ -43,7 +49,7 @@ export async function POST(req: Request) {
     console.error("VetLLM Error:", error)
     return new Response(
       JSON.stringify({
-        error: "Woof! I'm having trouble connecting to the VetLLM. Please try again! 🐾",
+        error: "Woof! Error: " + error.message + " 🐾",
       }),
       {
         status: 500,
