@@ -1,11 +1,13 @@
 export const runtime = "nodejs";
 
-import { PromptTemplate } from "langchain/prompts";
-import { HuggingFaceInference } from "langchain/llms/hf";
+import { PromptTemplate } from "@langchain/core/prompts";
+import { HuggingFaceInference } from "@langchain/community/llms/hf";
 import { initializeAgentExecutorWithOptions } from "langchain/agents";
-import { SerpAPI } from "langchain/tools";
+import { SerpAPI } from "@langchain/community/tools/serpapi";
 import { LLMChain } from "langchain/chains";
 import { BufferMemory } from "langchain/memory";
+
+
 
 console.log("ENV TOKEN IN SERVER:", process.env.HUGGING_FACE_ACCESS_TOKEN?.slice(0, 5));
 
