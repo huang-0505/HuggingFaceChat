@@ -1,103 +1,68 @@
-export const runtime = "nodejs"
+export const runtime = "nodejs";
 
-console.log("ENV TOKEN IN SERVER:", process.env.HUGGING_FACE_ACCESS_TOKEN?.slice(0, 5))
+import { PromptTemplate } from "langchain/prompts";
+import { HuggingFaceInference } from "langchain/llms/hf";
+import { initializeAgentExecutorWithOptions } from "langchain/agents";
+import { SerpAPI } from "langchain/tools";
+import { LLMChain } from "langchain/chains";
+import { BufferMemory } from "langchain/memory";
+
+console.log("ENV TOKEN IN SERVER:", process.env.HUGGING_FACE_ACCESS_TOKEN?.slice(0, 5));
 
 export async function POST(req: Request) {
   try {
-    // Check token
-    const token = process.env.HUGGING_FACE_ACCESS_TOKEN
-    console.log("Token exists:", !!token)
-    console.log("Token starts with hf_:", token?.startsWith("hf_"))
+    const token = process.env.HUGGING_FACE_ACCESS_TOKEN;
+    if (!token) throw new Error("Missing HUGGING_FACE_ACCESS_TOKEN");
 
-    if (!token) {
-      throw new Error("Missing HUGGING_FACE_ACCESS_TOKEN environment variable")
-    }
+    const { messages } = await req.json();
+    const latestInput = messages[messages.length - 1]?.content;
+    if (!latestInput) throw new Error("Missing user input");
 
-    const { messages } = await req.json()
-    const modelName = "mistralai/Mistral-7B-Instruct-v0.3"
+    // Prompt template with history injected by memory
+    const prompt = PromptTemplate.fromTemplate(`You are VetLLM, a helpful assistant for veterinary science.
+{history}
+Human: {input}
+VetLLM:`);
 
-    // Build conversation as a single string for Mistral
-    let conversationText = ""
-
-    for (const message of messages) {
-      if (message.role === "user") {
-        conversationText += `[INST] ${message.content} [/INST]\n`
-      } else {
-        conversationText += `${message.content}\n`
-      }
-    }
-
-    // Remove the last newline and add space for the assistant response
-    conversationText = conversationText.trim()
-
-    console.log("Conversation text:", conversationText.slice(0, 200) + "...")
-
-    // Use raw fetch with string input (not object)
-    const response = await fetch(`https://api-inference.huggingface.co/models/${modelName}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+    // Model: Mistral 7B hosted on Hugging Face
+    const model = new HuggingFaceInference({
+      model: "mistralai/Mistral-7B-Instruct-v0.3",
+      apiKey: token,
+      modelKwargs: {
+        temperature: 0.7,
+        max_new_tokens: 500,
+        do_sample: true,
+        return_full_text: false,
+        repetition_penalty: 1.1,
+        stop: ["Human:", "\nHuman:", "User:", "\nUser:"],
       },
-      body: JSON.stringify({
-        inputs: conversationText, // String, not object!
-        parameters: {
-          max_new_tokens: 500,
-          temperature: 0.7,
-          do_sample: true,
-          return_full_text: false,
-          repetition_penalty: 1.1,
-          stop: ["[INST]", "</s>"],
-        },
-      }),
-    })
+    });
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error("HF API Error:", errorText)
-      throw new Error(`HF API Error: ${response.status} - ${errorText}`)
-    }
+    // Tool setup
+    const tools = [new SerpAPI()]; // Web search tool
 
-    const data = await response.json()
-    console.log("Mistral Response:", data)
+    // Memory setup (LangChain will handle history injection automatically)
+    const memory = new BufferMemory({ returnMessages: true, memoryKey: "history" });
 
-    // Handle different response formats
-    let generatedText = ""
-    if (Array.isArray(data) && data[0]?.generated_text) {
-      generatedText = data[0].generated_text
-    } else if (data.generated_text) {
-      generatedText = data.generated_text
-    } else {
-      console.error("Unexpected response format:", data)
-      throw new Error("Unexpected response format from Mistral")
-    }
+    // Agent setup
+    const executor = await initializeAgentExecutorWithOptions(tools, model, {
+      agentType: "zero-shot-react-description",
+      verbose: true,
+      memory,
+    });
+
+    // Final call to the agent
+    const result = await executor.call({ input: latestInput });
 
     return new Response(
-      JSON.stringify({
-        content: generatedText.trim(),
-        role: "assistant",
-      }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    )
+      JSON.stringify({ content: result.output?.trim() || "", role: "assistant" }),
+      { headers: { "Content-Type": "application/json" } }
+    );
   } catch (error: any) {
-    console.error("Mistral Error:", error)
-    console.error("Error details:", error.message)
-
+    console.error("LangChain Error:", error);
     return new Response(
-      JSON.stringify({
-        error: "Woof! Error: " + error.message + " 🐾",
-        details: error.message || "No additional details",
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    )
+      JSON.stringify({ error: "Woof! Error: " + error.message + " 🐾" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
   }
 }
