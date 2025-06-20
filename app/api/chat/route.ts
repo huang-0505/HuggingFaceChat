@@ -13,20 +13,25 @@ console.log("ENV TOKEN IN SERVER:", process.env.HUGGING_FACE_ACCESS_TOKEN?.slice
 
 export async function POST(req: Request) {
   try {
+    console.log("🐾 Incoming request");
     const token = process.env.HUGGING_FACE_ACCESS_TOKEN;
     if (!token) throw new Error("Missing HUGGING_FACE_ACCESS_TOKEN");
 
     const { messages } = await req.json();
+    console.log("✅ Messages received:", messages);
+
     const latestInput = messages[messages.length - 1]?.content;
     if (!latestInput) throw new Error("Missing user input");
 
-    // Prompt template with history injected by memory
+    console.log("🧠 Latest user input:", latestInput);
+
+    // Prompt
     const prompt = PromptTemplate.fromTemplate(`You are VetLLM, a helpful assistant for veterinary science.
 {history}
 Human: {input}
 VetLLM:`);
 
-    // Model: Mistral 7B hosted on Hugging Face
+    // Model
     const model = new HuggingFaceInference({
       model: "mistralai/Mistral-7B-Instruct-v0.3",
       apiKey: token,
@@ -40,30 +45,37 @@ VetLLM:`);
       },
     });
 
-    // Tool setup
-    const tools = [new SerpAPI()]; // Web search tool
+    console.log("✅ Model initialized");
 
-    // Memory setup (LangChain will handle history injection automatically)
+    // Tool
+    const tools = [new SerpAPI()];
+    console.log("🔧 Tools loaded");
+
+    // Memory
     const memory = new BufferMemory({ returnMessages: true, memoryKey: "history" });
+    console.log("🧠 Memory initialized");
 
-    // Agent setup
+    // Agent
     const executor = await initializeAgentExecutorWithOptions(tools, model, {
       agentType: "zero-shot-react-description",
       verbose: true,
       memory,
     });
 
-    // Final call to the agent
+    console.log("🤖 Agent initialized");
+
+    // Agent execution
     const result = await executor.call({ input: latestInput });
+    console.log("✅ Agent response:", result);
 
     return new Response(
       JSON.stringify({ content: result.output?.trim() || "", role: "assistant" }),
       { headers: { "Content-Type": "application/json" } }
     );
   } catch (error: any) {
-    console.error("LangChain Error:", error);
+    console.error("❌ LangChain Error:", error);
     return new Response(
-      JSON.stringify({ error: "Woof! Error: " + error.message + " 🐾" }),
+      JSON.stringify({ error: "Woof! I encountered an error. Please try again - I'm here to help with your pet questions! 🐾" }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
