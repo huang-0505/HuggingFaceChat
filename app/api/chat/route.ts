@@ -2,12 +2,7 @@ export const runtime = "nodejs";
 
 import { PromptTemplate } from "@langchain/core/prompts";
 import { HuggingFaceInference } from "@langchain/community/llms/hf";
-import { initializeAgentExecutorWithOptions } from "langchain/agents";
-import { SerpAPI } from "@langchain/community/tools/serpapi";
-import { LLMChain } from "langchain/chains";
 import { BufferMemory } from "langchain/memory";
-
-
 
 console.log("ENV TOKEN IN SERVER:", process.env.HUGGING_FACE_ACCESS_TOKEN?.slice(0, 5));
 
@@ -25,13 +20,20 @@ export async function POST(req: Request) {
 
     console.log("🧠 Latest user input:", latestInput);
 
-    // Prompt
-    const prompt = PromptTemplate.fromTemplate(`You are VetLLM, a helpful assistant for veterinary science.
-{history}
-Human: {input}
-VetLLM:`);
+    // Memory: this stores past messages if needed
+    const memory = new BufferMemory({ returnMessages: true, memoryKey: "history" });
 
-    // Model
+    // Manually build conversation history
+    const historyText = messages
+      .slice(0, -1)
+      .map((m: any) => `${m.role === "assistant" ? "VetLLM" : "Human"}: ${m.content}`)
+      .join("\n");
+
+    const fullPrompt = `You are VetLLM, a helpful assistant for veterinary science.
+${historyText}
+Human: ${latestInput}
+VetLLM:`;
+
     const model = new HuggingFaceInference({
       model: "mistralai/Mistral-7B-Instruct-v0.3",
       apiKey: token,
@@ -45,37 +47,23 @@ VetLLM:`);
       },
     });
 
-    console.log("✅ Model initialized");
+    console.log("✅ Sending prompt:", fullPrompt);
 
-    // Tool
-    const tools = [new SerpAPI()];
-    console.log("🔧 Tools loaded");
+    const result = await model.invoke(fullPrompt);
 
-    // Memory
-    const memory = new BufferMemory({ returnMessages: true, memoryKey: "history" });
-    console.log("🧠 Memory initialized");
-
-    // Agent
-    const executor = await initializeAgentExecutorWithOptions(tools, model, {
-      agentType: "zero-shot-react-description",
-      verbose: true,
-      memory,
-    });
-
-    console.log("🤖 Agent initialized");
-
-    // Agent execution
-    const result = await executor.call({ input: latestInput });
-    console.log("✅ Agent response:", result);
+    console.log("✅ Model output:", result);
 
     return new Response(
-      JSON.stringify({ content: result.output?.trim() || "", role: "assistant" }),
+      JSON.stringify({ content: result?.trim() || "", role: "assistant" }),
       { headers: { "Content-Type": "application/json" } }
     );
+
   } catch (error: any) {
     console.error("❌ LangChain Error:", error);
     return new Response(
-      JSON.stringify({ error: "Woof! I encountered an error. Please try again - I'm here to help with your pet questions! 🐾" }),
+      JSON.stringify({
+        error: "Woof! I encountered an error. Please try again - I'm here to help with your pet questions! 🐾",
+      }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
