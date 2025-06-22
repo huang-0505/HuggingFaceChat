@@ -202,7 +202,7 @@ export default function VetLLMChatUI() {
           /* Welcome Screen */
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <div className="text-6xl mb-4">🐕‍⚕️</div>
+              <div className="text-6xl mb-4">🐕</div>
               <h1 className="text-3xl font-semibold mb-4 text-gray-200">How can I help your furry friend today?</h1>
               <p className="text-gray-400 mb-8">Ask me anything about pet health, behavior, or care!</p>
               <div className="flex justify-center space-x-4 text-2xl">
@@ -223,7 +223,7 @@ export default function VetLLMChatUI() {
                   <div className="flex items-start space-x-3 max-w-[80%]">
                     {message.role === "assistant" && (
                       <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm flex-shrink-0 mt-1">
-                        🐕‍⚕️
+                        🐕
                       </div>
                     )}
                     <div
@@ -247,7 +247,7 @@ export default function VetLLMChatUI() {
                 <div className="flex justify-start">
                   <div className="flex items-start space-x-3">
                     <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm flex-shrink-0">
-                      🐕‍⚕️
+                      🐕
                     </div>
                     <div className="bg-[#1a1a1a] text-gray-200 border border-gray-800 p-4 rounded-lg">
                       <div className="flex items-center space-x-2">
