@@ -1,5 +1,4 @@
 import { HfInference } from "@huggingface/inference"
-import { StreamingTextResponse } from "ai"
 
 const hf = new HfInference(process.env.HUGGING_FACE_ACCESS_TOKEN)
 
@@ -49,47 +48,55 @@ export async function POST(req: Request) {
       },
     })
 
-    // Create a readable stream
+    // Create a proper streaming response
+    const encoder = new TextEncoder()
+
     const stream = new ReadableStream({
       start(controller) {
         const text = response.generated_text
-        const encoder = new TextEncoder()
 
         // Split the text into chunks and stream them
         const words = text.split(" ")
         let i = 0
 
-        const interval = setInterval(() => {
+        const streamWords = () => {
           if (i < words.length) {
             const chunk = words[i] + " "
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: chunk })}\n\n`))
+            const data = `data: ${JSON.stringify({ content: chunk })}\n\n`
+            controller.enqueue(encoder.encode(data))
             i++
+            setTimeout(streamWords, 50) // Adjust speed as needed
           } else {
-            controller.enqueue(encoder.encode(`data: [DONE]\n\n`))
+            const doneData = `data: [DONE]\n\n`
+            controller.enqueue(encoder.encode(doneData))
             controller.close()
-            clearInterval(interval)
           }
-        }, 50)
+        }
+
+        streamWords()
       },
     })
 
-    return new StreamingTextResponse(stream)
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Transfer-Encoding": "chunked",
+      },
+    })
   } catch (error) {
     console.error("Hugging Face API error:", error)
 
-    // Fallback response
-    const fallbackText =
-      "I'm sorry, I'm having trouble connecting to my AI service right now. Please try again in a moment, and remember to consult your veterinarian for any urgent pet health concerns."
-
-    const stream = new ReadableStream({
-      start(controller) {
-        const encoder = new TextEncoder()
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: fallbackText })}\n\n`))
-        controller.enqueue(encoder.encode(`data: [DONE]\n\n`))
-        controller.close()
+    // Return error response
+    return new Response(
+      JSON.stringify({
+        error: "I'm sorry, I'm having trouble connecting to my AI service right now. Please try again in a moment.",
+      }),
+      {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+        },
       },
-    })
-
-    return new StreamingTextResponse(stream)
+    )
   }
 }

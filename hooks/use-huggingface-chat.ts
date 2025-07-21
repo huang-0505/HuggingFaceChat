@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useCallback } from "react"
 
 interface Message {
@@ -46,7 +45,9 @@ export function useHuggingFaceChat() {
         })
 
         if (!response.ok) {
-          throw new Error("Failed to get response")
+          // Handle error response
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error || "Failed to get response")
         }
 
         const reader = response.body?.getReader()
@@ -61,35 +62,39 @@ export function useHuggingFaceChat() {
         setMessages((prev) => [...prev, assistantMessage])
 
         if (reader) {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
+          try {
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
 
-            const chunk = decoder.decode(value)
-            const lines = chunk.split("\n")
+              const chunk = decoder.decode(value)
+              const lines = chunk.split("\n")
 
-            for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                const data = line.slice(6)
-                if (data === "[DONE]") {
-                  setIsLoading(false)
-                  return
-                }
-
-                try {
-                  const parsed = JSON.parse(data)
-                  if (parsed.content) {
-                    setMessages((prev) =>
-                      prev.map((msg) =>
-                        msg.id === assistantMessage.id ? { ...msg, content: msg.content + parsed.content } : msg,
-                      ),
-                    )
+              for (const line of lines) {
+                if (line.startsWith("data: ")) {
+                  const data = line.slice(6).trim()
+                  if (data === "[DONE]") {
+                    setIsLoading(false)
+                    return
                   }
-                } catch (e) {
-                  // Ignore parsing errors
+
+                  try {
+                    const parsed = JSON.parse(data)
+                    if (parsed.content) {
+                      setMessages((prev) =>
+                        prev.map((msg) =>
+                          msg.id === assistantMessage.id ? { ...msg, content: msg.content + parsed.content } : msg,
+                        ),
+                      )
+                    }
+                  } catch (e) {
+                    // Ignore parsing errors for individual chunks
+                  }
                 }
               }
             }
+          } finally {
+            reader.releaseLock()
           }
         }
       } catch (error) {
@@ -99,7 +104,7 @@ export function useHuggingFaceChat() {
           {
             id: (Date.now() + 1).toString(),
             role: "assistant",
-            content: "Sorry, I encountered an error. Please try again.",
+            content: error instanceof Error ? error.message : "Sorry, I encountered an error. Please try again.",
           },
         ])
       } finally {
