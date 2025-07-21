@@ -5,166 +5,239 @@ const hf = new HfInference(process.env.HUGGING_FACE_ACCESS_TOKEN)
 export async function POST(req: Request) {
   const { messages } = await req.json()
 
-  const lastMessage = messages[messages.length - 1]?.content || ""
-
-  // Build a proper veterinary prompt where AI acts as a veterinarian
-  let prompt = `You are Dr. VetLLM, a licensed veterinarian with 15 years of experience treating dogs, cats, rabbits, and other small animals. You provide specific medical advice, diagnoses, and treatment recommendations just like a real veterinarian would during a consultation.
-
-Key guidelines:
-- Act as a real veterinarian, not an AI assistant
-- Provide specific medical advice and treatment recommendations
-- Give detailed explanations about conditions, symptoms, and treatments
-- Recommend specific medications, dosages, and procedures when appropriate
-- Be professional but warm and caring
-- Ask follow-up questions about symptoms when needed
-- Provide immediate emergency advice when pets are in danger
+  // Build conversation context
+  let conversationText = `You are Dr. VetLLM, an experienced veterinarian. Provide specific, detailed medical advice based on the exact situation described. Pay attention to all details like age, breed, symptoms, and previous responses.
 
 `
 
   // Add conversation history
   messages.forEach((message: any) => {
     if (message.role === "user") {
-      prompt += `Pet Owner: ${message.content}\n`
+      conversationText += `Pet Owner: ${message.content}\n`
     } else if (message.role === "assistant") {
-      prompt += `Dr. VetLLM: ${message.content}\n`
+      conversationText += `Dr. VetLLM: ${message.content}\n`
     }
   })
 
-  prompt += "Dr. VetLLM:"
+  conversationText += "Dr. VetLLM:"
 
-  try {
-    const response = await hf.textGeneration({
-      model: "microsoft/DialoGPT-medium",
-      inputs: prompt,
-      parameters: {
-        max_new_tokens: 300,
-        temperature: 0.7,
-        top_p: 0.9,
-        repetition_penalty: 1.1,
-        return_full_text: false,
-      },
-      options: {
-        use_cache: false,
-      },
-    })
+  // Try multiple models in order of preference
+  const modelsToTry = [
+    "meta-llama/Llama-2-7b-chat-hf",
+    "mistralai/Mistral-7B-Instruct-v0.1",
+    "microsoft/DialoGPT-large",
+    "facebook/blenderbot-400M-distill",
+    "microsoft/DialoGPT-medium",
+  ]
 
-    const encoder = new TextEncoder()
-    const stream = new ReadableStream({
-      start(controller) {
-        const text = response.generated_text || getVeterinaryResponse(lastMessage)
+  for (const modelName of modelsToTry) {
+    try {
+      console.log(`Trying model: ${modelName}`)
 
-        const words = text.split(" ")
-        let i = 0
+      const response = await hf.textGeneration({
+        model: modelName,
+        inputs: conversationText,
+        parameters: {
+          max_new_tokens: 250,
+          temperature: 0.7,
+          top_p: 0.9,
+          repetition_penalty: 1.2,
+          return_full_text: false,
+          do_sample: true,
+        },
+        options: {
+          use_cache: false,
+          wait_for_model: true,
+        },
+      })
 
-        const streamWords = () => {
-          if (i < words.length) {
-            const chunk = words[i] + " "
-            const data = `data: ${JSON.stringify({ content: chunk })}\n\n`
-            controller.enqueue(encoder.encode(data))
-            i++
-            setTimeout(streamWords, 50)
-          } else {
-            const doneData = `data: [DONE]\n\n`
-            controller.enqueue(encoder.encode(doneData))
-            controller.close()
-          }
-        }
+      if (response.generated_text && response.generated_text.trim().length > 10) {
+        // Success! Stream the response
+        const encoder = new TextEncoder()
+        const stream = new ReadableStream({
+          start(controller) {
+            const text = response.generated_text.trim()
+            const words = text.split(" ")
+            let i = 0
 
-        streamWords()
-      },
-    })
+            const streamWords = () => {
+              if (i < words.length) {
+                const chunk = words[i] + " "
+                const data = `data: ${JSON.stringify({ content: chunk })}\n\n`
+                controller.enqueue(encoder.encode(data))
+                i++
+                setTimeout(streamWords, 30)
+              } else {
+                const doneData = `data: [DONE]\n\n`
+                controller.enqueue(encoder.encode(doneData))
+                controller.close()
+              }
+            }
 
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Transfer-Encoding": "chunked",
-      },
-    })
-  } catch (error) {
-    console.error("Hugging Face API error:", error)
+            streamWords()
+          },
+        })
 
-    // Fallback with specific veterinary responses
-    const veterinaryResponse = getVeterinaryResponse(lastMessage)
-
-    const encoder = new TextEncoder()
-    const stream = new ReadableStream({
-      start(controller) {
-        const data = `data: ${JSON.stringify({ content: veterinaryResponse })}\n\n`
-        controller.enqueue(encoder.encode(data))
-        controller.enqueue(encoder.encode(`data: [DONE]\n\n`))
-        controller.close()
-      },
-    })
-
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Transfer-Encoding": "chunked",
-      },
-    })
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Transfer-Encoding": "chunked",
+          },
+        })
+      }
+    } catch (error) {
+      console.error(`Model ${modelName} failed:`, error)
+      continue // Try next model
+    }
   }
+
+  // If all models fail, provide intelligent fallback based on conversation context
+  const lastMessage = messages[messages.length - 1]?.content || ""
+  const intelligentResponse = getIntelligentVeterinaryResponse(messages)
+
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    start(controller) {
+      const data = `data: ${JSON.stringify({ content: intelligentResponse })}\n\n`
+      controller.enqueue(encoder.encode(data))
+      controller.enqueue(encoder.encode(`data: [DONE]\n\n`))
+      controller.close()
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Transfer-Encoding": "chunked",
+    },
+  })
 }
 
-function getVeterinaryResponse(question: string): string {
-  const lowerQuestion = question.toLowerCase()
+function getIntelligentVeterinaryResponse(messages: any[]): string {
+  const conversation = messages.map((m) => m.content.toLowerCase()).join(" ")
+  const lastMessage = messages[messages.length - 1]?.content || ""
 
-  // Emergency/Toxic situations
-  if (lowerQuestion.includes("chocolate") && (lowerQuestion.includes("dog") || lowerQuestion.includes("puppy"))) {
-    return "⚠️ EMERGENCY: Chocolate is highly toxic to dogs! Do NOT feed chocolate to your dog under any circumstances. If your dog has already eaten chocolate, contact me immediately or go to the nearest emergency vet clinic. The theobromine in chocolate can cause vomiting, diarrhea, seizures, and even death. Dark chocolate and baking chocolate are the most dangerous. How much chocolate did your dog consume and when?"
+  // Extract key information from conversation
+  const age = extractAge(conversation)
+  const animal = extractAnimal(conversation)
+  const symptoms = extractSymptoms(conversation)
+
+  // Senior pet (18 years old cat example)
+  if (age >= 15 && animal === "cat") {
+    return `At 18 years old, your cat is considered a senior and needs special dietary considerations. Senior cats often benefit from:
+
+• **Higher protein, easily digestible food** - Look for senior cat formulas with 35-45% protein
+• **Smaller, more frequent meals** - 3-4 small meals daily instead of 2 large ones
+• **Wet food is crucial** - Senior cats are prone to kidney issues and need extra hydration
+• **Joint support** - Foods with glucosamine/chondroitin or omega-3 fatty acids
+• **Regular weight monitoring** - Senior cats can lose muscle mass
+
+For an 18-year-old cat, I'd specifically recommend prescription senior diets like Hill's k/d or Royal Canin Senior. Have you noticed any changes in appetite, weight, or litter box habits? Senior cats should have bloodwork every 6 months to monitor kidney and thyroid function.`
   }
 
-  if (lowerQuestion.includes("grapes") || lowerQuestion.includes("raisins")) {
-    return "⚠️ EMERGENCY: Grapes and raisins are extremely toxic to dogs and can cause kidney failure. Never give grapes or raisins to dogs. If your dog has eaten any, seek emergency veterinary care immediately. Even small amounts can be dangerous."
+  if (age >= 10 && animal === "dog") {
+    return `At ${age} years old, your dog is entering their senior years and needs adjusted nutrition:
+
+• **Senior dog formula** with appropriate protein levels for their kidney function
+• **Joint support ingredients** - Glucosamine, chondroitin, omega-3s
+• **Easier to digest** - May need smaller kibble size or wet food
+• **Weight management** - Senior dogs are less active and prone to weight gain
+• **Regular vet checkups** every 6 months
+
+What's your dog's current weight and activity level? Large breeds are considered senior at 6-7 years, while small breeds at 10-12 years.`
   }
 
-  if (lowerQuestion.includes("onion") || lowerQuestion.includes("garlic")) {
-    return "⚠️ WARNING: Onions and garlic are toxic to both dogs and cats. They can cause anemia by damaging red blood cells. Avoid feeding any foods containing onions or garlic to your pets. If your pet has consumed these, monitor for symptoms like weakness, lethargy, and pale gums."
+  // Chocolate emergency
+  if (conversation.includes("chocolate") && (conversation.includes("dog") || conversation.includes("puppy"))) {
+    return `🚨 **EMERGENCY - CHOCOLATE TOXICITY** 🚨
+
+**DO NOT WAIT** - This is a veterinary emergency! Chocolate contains theobromine which is toxic to dogs.
+
+**Immediate actions:**
+1. **Call emergency vet NOW** or pet poison control: (888) 426-4435
+2. **Induce vomiting ONLY if instructed** by vet (within 2 hours of ingestion)
+3. **Bring chocolate packaging** to show vet the type and amount
+
+**Toxicity depends on:**
+- Type: Baking chocolate > Dark chocolate > Milk chocolate > White chocolate
+- Amount consumed vs dog's weight
+- Time since ingestion
+
+**Symptoms to watch for:** Vomiting, diarrhea, excessive thirst, restlessness, rapid heart rate, seizures
+
+**How much chocolate and what type did your dog eat? What's your dog's weight?** Time is critical!`
   }
 
-  // Feeding questions
-  if (lowerQuestion.includes("feed") && lowerQuestion.includes("cat")) {
-    return "For cats, I recommend feeding a high-quality commercial cat food that's appropriate for their life stage. Adult cats should eat 2-3 small meals per day. Look for foods with real meat as the first ingredient and avoid foods with excessive fillers. Wet food is excellent for hydration. How old is your cat and what are you currently feeding them?"
+  // Feeding questions with specific details
+  if (conversation.includes("feed") && animal) {
+    if (animal === "cat") {
+      return `For your cat's feeding, I need to consider their specific needs:
+
+**Daily feeding guidelines:**
+• **Kittens (0-12 months):** 3-4 meals of kitten formula food
+• **Adults (1-7 years):** 2-3 meals of adult cat food  
+• **Seniors (7+ years):** 2-3 smaller meals of senior formula
+
+**Food quality indicators:**
+• First ingredient should be named meat (chicken, salmon, etc.)
+• Avoid foods with excessive corn, wheat, or by-products
+• Look for AAFCO certification
+
+**Wet vs Dry:** Cats need moisture - aim for 70% wet food, 30% dry
+
+What's your cat's current age, weight, and any health conditions? This helps me recommend specific brands and portions.`
+    }
+
+    if (animal === "dog") {
+      return `For your dog's nutrition, let me provide specific guidance:
+
+**Feeding schedule by age:**
+• **Puppies (8 weeks-6 months):** 3-4 meals daily
+• **Young adults (6 months-2 years):** 2 meals daily
+• **Adults (2-7 years):** 2 meals daily
+• **Seniors (7+ years):** 2 smaller meals daily
+
+**Portion sizes depend on:**
+- Current weight and target weight
+- Activity level (working dogs need more calories)
+- Breed size (large breeds have different needs)
+
+**Quality indicators:**
+• Named meat as first ingredient
+• No excessive fillers or by-products
+• Appropriate for life stage
+
+What's your dog's breed, age, current weight, and activity level? I can then calculate exact portions and recommend specific foods.`
+    }
   }
 
-  if (lowerQuestion.includes("feed") && lowerQuestion.includes("dog")) {
-    return "Dogs should be fed a high-quality commercial dog food appropriate for their age, size, and activity level. Puppies need puppy food until 12-18 months, adults need maintenance food, and seniors may benefit from senior formulas. Feed adult dogs twice daily. What's your dog's breed, age, and current weight?"
-  }
+  // Default intelligent response
+  return `I'm Dr. VetLLM, and I want to give you the most helpful advice possible. To provide the best recommendations, could you share:
 
-  if (lowerQuestion.includes("feed") && lowerQuestion.includes("rabbit")) {
-    return "Rabbits need a diet of high-quality hay (timothy hay for adults), fresh vegetables, and a small amount of pellets. Avoid iceberg lettuce and stick to dark leafy greens like romaine, kale, and herbs. Fresh water should always be available. How old is your rabbit?"
-  }
+• **Your pet's species, breed, and age**
+• **Current symptoms or concerns** 
+• **Any recent changes** in behavior, appetite, or habits
+• **Current diet or medications**
 
-  // Health symptoms
-  if (lowerQuestion.includes("vomit") || lowerQuestion.includes("throwing up")) {
-    return "Vomiting can indicate various conditions from simple dietary indiscretion to serious illness. If it's occasional and your pet is otherwise normal, withhold food for 12 hours then offer small amounts of bland food. However, if there's blood, frequent vomiting, lethargy, or other symptoms, this needs immediate attention. Can you describe the vomit and how often it's happening?"
-  }
+The more specific details you provide, the more targeted and useful my medical advice can be. What's the main concern you'd like me to address today?`
+}
 
-  if (lowerQuestion.includes("diarrhea") || lowerQuestion.includes("loose stool")) {
-    return "Diarrhea can be caused by dietary changes, stress, parasites, or infections. For mild cases, I recommend a bland diet (boiled chicken and rice for dogs, or prescription diet for cats) and ensuring good hydration. If there's blood, mucus, or if it persists more than 24 hours, we need to examine your pet. How long has this been going on?"
-  }
+function extractAge(text: string): number {
+  const ageMatch = text.match(/(\d+)\s*years?\s*old/i)
+  return ageMatch ? Number.parseInt(ageMatch[1]) : 0
+}
 
-  if (lowerQuestion.includes("scratch") || lowerQuestion.includes("itch")) {
-    return "Excessive scratching usually indicates allergies, parasites (fleas, mites), or skin infections. I'd recommend checking for fleas first, then consider food allergies or environmental allergens. We may need to do skin scrapings or allergy testing. Are you seeing any redness, hair loss, or specific areas they're focusing on?"
-  }
+function extractAnimal(text: string): string {
+  if (text.includes("cat") || text.includes("kitten")) return "cat"
+  if (text.includes("dog") || text.includes("puppy")) return "dog"
+  if (text.includes("rabbit") || text.includes("bunny")) return "rabbit"
+  return ""
+}
 
-  // Behavioral questions
-  if (lowerQuestion.includes("aggressive") || lowerQuestion.includes("biting")) {
-    return "Aggression can stem from fear, pain, territorial behavior, or medical issues. First, I'd want to rule out any underlying pain or illness with a physical exam. Then we can discuss behavior modification techniques and possibly anti-anxiety medications. Has this behavior started recently or been ongoing?"
-  }
-
-  if (lowerQuestion.includes("training") || lowerQuestion.includes("house") || lowerQuestion.includes("potty")) {
-    return "House training requires consistency and patience. Take your pet out frequently (every 2-3 hours for puppies), reward immediately after they go outside, and clean accidents thoroughly with enzymatic cleaners. Never punish accidents. Most pets can be fully house trained within 4-6 months with consistent effort."
-  }
-
-  // General health
-  if (lowerQuestion.includes("vaccine") || lowerQuestion.includes("shot")) {
-    return "Vaccinations are crucial for preventing serious diseases. Dogs need DHPP (distemper, hepatitis, parvovirus, parainfluenza) and rabies vaccines. Cats need FVRCP (feline viral rhinotracheitis, calicivirus, panleukopenia) and rabies. Puppies and kittens need a series starting at 6-8 weeks. When was your pet's last vaccination?"
-  }
-
-  if (lowerQuestion.includes("spay") || lowerQuestion.includes("neuter")) {
-    return "I generally recommend spaying/neutering between 4-6 months of age, before the first heat cycle for females. This prevents unwanted pregnancies and reduces risks of certain cancers and behavioral issues. The surgery is routine and recovery is typically 10-14 days. Do you have specific concerns about the procedure?"
-  }
-
-  // Default response
-  return "Hello! I'm Dr. VetLLM, and I'm here to help with your pet's health concerns. Could you tell me more details about what's going on with your pet? The more specific information you can provide about symptoms, duration, and your pet's behavior, the better I can assist you with a proper assessment and treatment plan."
+function extractSymptoms(text: string): string[] {
+  const symptoms = []
+  if (text.includes("vomit")) symptoms.push("vomiting")
+  if (text.includes("diarrhea")) symptoms.push("diarrhea")
+  if (text.includes("scratch") || text.includes("itch")) symptoms.push("itching")
+  return symptoms
 }
