@@ -6,36 +6,43 @@ const hf = new HfInference(process.env.HUGGING_FACE_ACCESS_TOKEN)
 export async function POST(req: Request) {
   const { messages } = await req.json()
 
-  // Get the last user message
-  const lastMessage = messages[messages.length - 1]
+  // Convert messages to Hugging Face conversational format
+  const pastUserInputs: string[] = []
+  const generatedResponses: string[] = []
 
-  // Create a system prompt for veterinary assistance
-  const systemPrompt = `You are VetLLM, a helpful veterinary AI assistant. You specialize in providing information about pet health, behavior, and care. 
+  // Extract conversation history
+  for (let i = 0; i < messages.length - 1; i += 2) {
+    if (messages[i]?.role === "user") {
+      pastUserInputs.push(messages[i].content)
+    }
+    if (messages[i + 1]?.role === "assistant") {
+      generatedResponses.push(messages[i + 1].content)
+    }
+  }
 
-Key guidelines:
-- Always be compassionate and understanding about pet concerns
-- Provide helpful, accurate information about common pet issues
-- Always recommend consulting a veterinarian for serious health concerns
-- Be friendly and use a warm, professional tone
-- Focus on dogs, cats, rabbits, hamsters, and other common pets
-- Provide practical advice when appropriate
-- If unsure about something, recommend professional veterinary consultation
+  // Get the current user input
+  const currentUserInput = messages[messages.length - 1]?.content || ""
 
-Remember: You are an AI assistant and cannot replace professional veterinary care.
+  // Add system context to the first message
+  const systemContext =
+    "You are VetLLM, a helpful veterinary AI assistant. You specialize in providing information about pet health, behavior, and care. Always be compassionate, provide helpful information, and recommend consulting a veterinarian for serious health concerns."
 
-User: ${lastMessage.content}
-Assistant:`
+  const contextualInput =
+    pastUserInputs.length === 0 ? `${systemContext}\n\nUser: ${currentUserInput}` : currentUserInput
 
   try {
-    const response = await hf.textGeneration({
+    const response = await hf.conversational({
       model: "mistralai/Mistral-7B-Instruct-v0.2",
-      inputs: systemPrompt,
+      inputs: {
+        past_user_inputs: pastUserInputs,
+        generated_responses: generatedResponses,
+        text: contextualInput,
+      },
       parameters: {
-        max_new_tokens: 500,
+        max_length: 500,
         temperature: 0.7,
         top_p: 0.9,
         repetition_penalty: 1.1,
-        return_full_text: false,
       },
       options: {
         use_cache: false,
@@ -62,13 +69,27 @@ Assistant:`
             controller.close()
             clearInterval(interval)
           }
-        }, 50) // Adjust speed as needed
+        }, 50)
       },
     })
 
     return new StreamingTextResponse(stream)
   } catch (error) {
     console.error("Hugging Face API error:", error)
-    return new Response("Error generating response", { status: 500 })
+
+    // Fallback response
+    const fallbackText =
+      "I'm sorry, I'm having trouble connecting to my AI service right now. Please try again in a moment, and remember to consult your veterinarian for any urgent pet health concerns."
+
+    const stream = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder()
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: fallbackText })}\n\n`))
+        controller.enqueue(encoder.encode(`data: [DONE]\n\n`))
+        controller.close()
+      },
+    })
+
+    return new StreamingTextResponse(stream)
   }
 }
