@@ -8,21 +8,68 @@ import { Separator } from "@/components/ui/separator"
 import { Plus, Send, Mic, ChevronDown, Dog } from "lucide-react"
 import { useHuggingFaceChat } from "../hooks/use-huggingface-chat"
 
+interface Consultation {
+  id: string
+  name: string
+  timestamp: Date
+  messages: any[]
+}
+
 export default function VetLLMChat() {
-  const [consultations, setConsultations] = useState<string[]>([])
+  const [consultations, setConsultations] = useState<Consultation[]>([])
   const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages, setInput } = useHuggingFaceChat()
 
   const startNewConsultation = () => {
+    // Save current conversation to recent consultations (if it has messages)
+    if (messages.length > 0) {
+      const now = new Date()
+
+      // Generate consultation name based on first user message
+      const firstUserMessage = messages.find((m) => m.role === "user")?.content || ""
+      let consultationName = "New consultation"
+
+      if (firstUserMessage) {
+        // Take first few words of the first message
+        const words = firstUserMessage.split(" ").slice(0, 4).join(" ")
+        consultationName = words.length > 30 ? words.substring(0, 30) + "..." : words
+      }
+
+      const newConsultation: Consultation = {
+        id: Date.now().toString(),
+        name: consultationName,
+        timestamp: now,
+        messages: [...messages],
+      }
+
+      setConsultations((prev) => [newConsultation, ...prev])
+    }
+
     // Clear current messages and reset chat
     setMessages([])
     setInput("")
+  }
 
-    // Create new consultation with timestamp
-    const now = new Date()
-    const timeString = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    const newConsultation = `Consultation ${timeString}`
+  const loadConsultation = (consultation: Consultation) => {
+    setMessages(consultation.messages)
+    setInput("")
+  }
 
-    setConsultations([newConsultation, ...consultations])
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  }
+
+  const formatDate = (date: Date) => {
+    const today = new Date()
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+
+    if (date.toDateString() === today.toDateString()) {
+      return "Today"
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return "Yesterday"
+    } else {
+      return date.toLocaleDateString()
+    }
   }
 
   const isEmptyChat = messages.length === 0
@@ -64,9 +111,17 @@ export default function VetLLMChat() {
               </div>
             ) : (
               <div className="space-y-2">
-                {consultations.map((consultation, index) => (
-                  <div key={index} className="p-2 rounded-lg hover:bg-gray-700 cursor-pointer text-sm">
-                    {consultation}
+                {consultations.map((consultation) => (
+                  <div
+                    key={consultation.id}
+                    className="p-3 rounded-lg hover:bg-gray-700 cursor-pointer text-sm border-l-2 border-transparent hover:border-amber-400 transition-all"
+                    onClick={() => loadConsultation(consultation)}
+                  >
+                    <div className="font-medium text-gray-200 mb-1 line-clamp-2">{consultation.name}</div>
+                    <div className="text-xs text-gray-400">
+                      {formatDate(consultation.timestamp)} • {formatTime(consultation.timestamp)}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">{consultation.messages.length} messages</div>
                   </div>
                 ))}
               </div>
