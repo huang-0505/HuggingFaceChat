@@ -1,43 +1,38 @@
-// Located at: app/api/chat/route.js (or .ts)
+export const runtime = "nodejs"
 
-// This tells Vercel to use the more robust Node.js runtime
-export const runtime = "nodejs";
+console.log("ENV TOKEN IN SERVER:", process.env.HUGGING_FACE_ACCESS_TOKEN?.slice(0, 5))
 
-// The main function that handles chat requests
-export async function POST(req) {
+export async function POST(req: Request) {
   try {
-    // 1. Get the conversation messages from the frontend's request
-    const { messages } = await req.json();
+    // Check token
+    const token = process.env.HUGGING_FACE_ACCESS_TOKEN
+    console.log("Token exists:", !!token)
+    console.log("Token starts with hf_:", token?.startsWith("hf_"))
 
-    // 2. Get your Hugging Face token from Vercel's environment variables
-    const token = process.env.HUGGING_FACE_ACCESS_TOKEN;
-
-    // A crucial check to make sure the token is configured in Vercel
     if (!token) {
-      throw new Error("Missing HUGGING_FACE_ACCESS_TOKEN environment variable");
+      throw new Error("Missing HUGGING_FACE_ACCESS_TOKEN environment variable")
     }
 
-    // 3. Define the model we are calling
-    const modelName = "mistralai/Mistral-7B-Instruct-v0.3";
+    const { messages } = await req.json()
+    const modelName = "mistralai/Mistral-7B-Instruct-v0.3"
 
-    // 4. Format the conversation history into the specific string format that Mistral expects
-    let conversationText = "<s>"; // Start with the Begin-of-Sequence token
+    // Build conversation as a single string for Mistral
+    let conversationText = ""
 
-    // Loop through all messages except the very last one
-    for (let i = 0; i < messages.length - 1; i++) {
-        const message = messages[i];
-        if (message.role === "user") {
-            conversationText += `[INST] ${message.content} [/INST]`;
-        } else if (message.role === "assistant") {
-            conversationText += `${message.content}</s>`; // End assistant's turn
-        }
+    for (const message of messages) {
+      if (message.role === "user") {
+        conversationText += `[INST] ${message.content} [/INST]\n`
+      } else {
+        conversationText += `${message.content}\n`
+      }
     }
-    // Add the final user message. The model will generate what comes after this.
-    const lastUserMessage = messages[messages.length - 1];
-    conversationText += `[INST] ${lastUserMessage.content} [/INST]`;
 
+    // Remove the last newline and add space for the assistant response
+    conversationText = conversationText.trim()
 
-    // 5. Make the direct API call to Hugging Face
+    console.log("Conversation text:", conversationText.slice(0, 200) + "...")
+
+    // Use raw fetch with string input (not object)
     const response = await fetch(`https://api-inference.huggingface.co/models/${modelName}`, {
       method: "POST",
       headers: {
@@ -45,47 +40,57 @@ export async function POST(req) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        inputs: conversationText,
+        inputs: conversationText, // String, not object!
         parameters: {
-          max_new_tokens: 512,
-          temperature: 0.6,
-          top_p: 0.9,
+          max_new_tokens: 500,
+          temperature: 0.7,
           do_sample: true,
-          return_full_text: false, // Very important for chat!
+          return_full_text: false,
+          repetition_penalty: 1.1,
+          stop: ["[INST]", "</s>"],
         },
       }),
-    });
+    })
 
-    // 6. Check for errors from the Hugging Face API
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Hugging Face API Error: ${response.status} - ${errorText}`);
+      const errorText = await response.text()
+      console.error("HF API Error:", errorText)
+      throw new Error(`HF API Error: ${response.status} - ${errorText}`)
     }
 
-    // 7. Parse the successful response
-    const data = await response.json();
-    const generatedText = data[0]?.generated_text || "";
+    const data = await response.json()
+    console.log("Mistral Response:", data)
 
-    // 8. Send the final response back to your chatbot UI
+    // Handle different response formats
+    let generatedText = ""
+    if (Array.isArray(data) && data[0]?.generated_text) {
+      generatedText = data[0].generated_text
+    } else if (data.generated_text) {
+      generatedText = data.generated_text
+    } else {
+      console.error("Unexpected response format:", data)
+      throw new Error("Unexpected response format from Mistral")
+    }
+
     return new Response(
       JSON.stringify({
-        role: "assistant",
         content: generatedText.trim(),
+        role: "assistant",
       }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
-
-  } catch (error) {
-    // This block catches any error and sends a structured message to the frontend.
-    console.error("Error in /api/chat:", error);
-    
-    // Check if error is an object and has a message property
-    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    )
+  } catch (error: any) {
+    console.error("Mistral Error:", error)
+    console.error("Error details:", error.message)
 
     return new Response(
       JSON.stringify({
-        error: "Woof! I encountered an error. Please try again - I'm here to help with your pet questions! 🐾",
-        details: errorMessage,
+        error: "Woof! Error: " + error.message + " 🐾",
+        details: error.message || "No additional details",
       }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
