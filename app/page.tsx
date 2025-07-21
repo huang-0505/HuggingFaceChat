@@ -10,10 +10,18 @@ import { useHuggingFaceChat } from "../hooks/use-huggingface-chat"
 
 export default function VetLLMChat() {
   const [consultations, setConsultations] = useState<string[]>([])
-  const { messages, input, handleInputChange, handleSubmit, isLoading } = useHuggingFaceChat()
+  const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages, setInput } = useHuggingFaceChat()
 
   const startNewConsultation = () => {
-    const newConsultation = `Consultation ${consultations.length + 1}`
+    // Clear current messages and reset chat
+    setMessages([])
+    setInput("")
+
+    // Create new consultation with timestamp
+    const now = new Date()
+    const timeString = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    const newConsultation = `Consultation ${timeString}`
+
     setConsultations([newConsultation, ...consultations])
   }
 

@@ -120,5 +120,6 @@ export function useHuggingFaceChat() {
     handleInputChange,
     handleSubmit,
     isLoading,
+    setMessages,
   }
 }
